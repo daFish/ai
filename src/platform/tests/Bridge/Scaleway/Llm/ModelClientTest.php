@@ -60,7 +60,13 @@ final class ModelClientTest extends TestCase
             self::assertSame('POST', $method);
             self::assertSame('https://api.scaleway.ai/v1/chat/completions', $url);
             self::assertSame('Authorization: Bearer scaleway-api-key', $options['normalized_headers']['authorization'][0]);
-            self::assertSame('{"temperature":1,"model":"deepseek-r1-distill-llama-70b","messages":[{"role":"user","content":"test message"}]}', $options['body']);
+            self::assertSame([
+                'temperature' => 1,
+                'model' => 'deepseek-r1-distill-llama-70b',
+                'messages' => [
+                    ['role' => 'user', 'content' => 'test message'],
+                ],
+            ], json_decode($options['body'], true));
 
             return new MockResponse();
         };
@@ -75,7 +81,13 @@ final class ModelClientTest extends TestCase
             self::assertSame('POST', $method);
             self::assertSame('https://api.scaleway.ai/v1/chat/completions', $url);
             self::assertSame('Authorization: Bearer scaleway-api-key', $options['normalized_headers']['authorization'][0]);
-            self::assertSame('{"temperature":0.7,"model":"deepseek-r1-distill-llama-70b","messages":[{"role":"user","content":"Hello"}]}', $options['body']);
+            self::assertSame([
+                'temperature' => 0.7,
+                'model' => 'deepseek-r1-distill-llama-70b',
+                'messages' => [
+                    ['role' => 'user', 'content' => 'Hello'],
+                ],
+            ], json_decode($options['body'], true));
 
             return new MockResponse();
         };
@@ -96,5 +108,33 @@ final class ModelClientTest extends TestCase
         $httpClient = new MockHttpClient([$resultCallback]);
         $modelClient = new ModelClient($httpClient, 'scaleway-api-key');
         $modelClient->request(new Scaleway('deepseek-r1-distill-llama-70b'), ['messages' => []], []);
+    }
+
+    public function testItUsesResponsesApiForGptOssModel()
+    {
+        $resultCallback = static function (string $method, string $url, array $options): HttpResponse {
+            self::assertSame('POST', $method);
+            self::assertSame('https://api.scaleway.ai/v1/responses', $url);
+            self::assertSame('Authorization: Bearer scaleway-api-key', $options['normalized_headers']['authorization'][0]);
+            self::assertSame([
+                'model' => 'gpt-oss-120b',
+                'input' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'input_text',
+                                'text' => 'Hello',
+                            ],
+                        ],
+                    ],
+                ],
+            ], json_decode($options['body'], true));
+
+            return new MockResponse();
+        };
+        $httpClient = new MockHttpClient([$resultCallback]);
+        $modelClient = new ModelClient($httpClient, 'scaleway-api-key');
+        $modelClient->request(new Scaleway('gpt-oss-120b'), ['messages' => [['role' => 'user', 'content' => 'Hello']]], []);
     }
 }

@@ -45,6 +45,10 @@ final class ResultConverter implements ResultConverterInterface
             throw new ContentFilterException($data['error']['message']);
         }
 
+        if (isset($data['output'])) {
+            return $this->convertResponseOutput($data['output']);
+        }
+
         if (!isset($data['choices'])) {
             throw new RuntimeException('Result does not contain choices.');
         }
@@ -58,6 +62,12 @@ final class ResultConverter implements ResultConverterInterface
     {
         $toolCalls = [];
         foreach ($result->getDataStream() as $data) {
+            if (isset($data['output'])) {
+                yield from $this->convertResponsesStreamChunk($data['output']);
+
+                continue;
+            }
+
             if ($this->streamIsToolCall($data)) {
                 $toolCalls = $this->convertStreamToToolCalls($toolCalls, $data);
             }
@@ -153,6 +163,33 @@ final class ResultConverter implements ResultConverterInterface
     }
 
     /**
+     * @param array<int, array<string, mixed>> $output
+     */
+    private function convertResponseOutput(array $output): ResultInterface
+    {
+        $toolCalls = array_filter($output, static fn (array $item): bool => 'function_call' === ($item['type'] ?? null));
+
+        if ([] !== $toolCalls) {
+            return new ToolCallResult(...array_map($this->convertResponseFunctionCall(...), $toolCalls));
+        }
+
+        $messages = [];
+        foreach ($output as $outputItem) {
+            foreach ($outputItem['content'] ?? [] as $content) {
+                if ('output_text' === ($content['type'] ?? null) && isset($content['text'])) {
+                    $messages[] = new TextResult($content['text']);
+                }
+            }
+        }
+
+        if ([] === $messages) {
+            throw new RuntimeException('Result does not contain output content.');
+        }
+
+        return 1 === \count($messages) ? $messages[0] : new ChoiceResult(...$messages);
+    }
+
+    /**
      * @param array{
      *     id: string,
      *     type: 'function',
@@ -167,5 +204,44 @@ final class ResultConverter implements ResultConverterInterface
         $arguments = json_decode($toolCall['function']['arguments'], true, flags: \JSON_THROW_ON_ERROR);
 
         return new ToolCall($toolCall['id'], $toolCall['function']['name'], $arguments);
+    }
+
+    /**
+     * @param array<string, mixed> $toolCall
+     */
+    private function convertResponseFunctionCall(array $toolCall): ToolCall
+    {
+        return $this->convertToolCall([
+            'id' => $toolCall['call_id'] ?? $toolCall['id'],
+            'type' => 'function',
+            'function' => [
+                'name' => $toolCall['name'],
+                'arguments' => $toolCall['arguments'] ?? '{}',
+            ],
+        ]);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $output
+     */
+    private function convertResponsesStreamChunk(array $output): \Generator
+    {
+        $toolCalls = array_filter($output, static fn (array $item): bool => 'function_call' === ($item['type'] ?? null));
+
+        if ([] !== $toolCalls) {
+            yield new ToolCallResult(...array_map($this->convertResponseFunctionCall(...), $toolCalls));
+
+            return;
+        }
+
+        foreach ($output as $outputItem) {
+            foreach ($outputItem['content'] ?? [] as $content) {
+                if ('output_text' !== ($content['type'] ?? null) || !isset($content['text'])) {
+                    continue;
+                }
+
+                yield $content['text'];
+            }
+        }
     }
 }
